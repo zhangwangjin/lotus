@@ -176,17 +176,17 @@ func (ht *apiIpldStore) Put(ctx context.Context, v interface{}) (cid.Cid, error)
 }
 
 func RecordTipsetStatePoints(ctx context.Context, api api.FullNode, pl *PointList, tipset *types.TipSet) error {
-	pc, err := api.StatePledgeCollateral(ctx, tipset.Key())
-	if err != nil {
-		return err
-	}
+	//pc, err := api.StatePledgeCollateral(ctx, tipset.Key())
+	//if err != nil {
+	//return err
+	//}
 
 	attoFil := types.NewInt(build.FilecoinPrecision).Int
 
-	pcFil := new(big.Rat).SetFrac(pc.Int, attoFil)
-	pcFilFloat, _ := pcFil.Float64()
-	p := NewPoint("chain.pledge_collateral", pcFilFloat)
-	pl.AddPoint(p)
+	//pcFil := new(big.Rat).SetFrac(pc.Int, attoFil)
+	//pcFilFloat, _ := pcFil.Float64()
+	//p := NewPoint("chain.pledge_collateral", pcFilFloat)
+	//pl.AddPoint(p)
 
 	netBal, err := api.WalletBalance(ctx, builtin.RewardActorAddr)
 	if err != nil {
@@ -195,7 +195,7 @@ func RecordTipsetStatePoints(ctx context.Context, api api.FullNode, pl *PointLis
 
 	netBalFil := new(big.Rat).SetFrac(netBal.Int, attoFil)
 	netBalFilFloat, _ := netBalFil.Float64()
-	p = NewPoint("network.balance", netBalFilFloat)
+	p := NewPoint("network.balance", netBalFilFloat)
 	pl.AddPoint(p)
 
 	totalPower, err := api.StateMinerPower(ctx, address.Address{}, tipset.Key())
