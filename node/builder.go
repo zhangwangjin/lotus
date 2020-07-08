@@ -469,6 +469,8 @@ func FullAPI(out *api.FullNode) Option {
 
 type StopFunc func(context.Context) error
 
+type StartFunc func(context.Context) error
+
 // New builds and starts new Filecoin node
 func New(ctx context.Context, opts ...Option) (StopFunc, error) {
 	settings := Settings{
@@ -511,6 +513,50 @@ func New(ctx context.Context, opts ...Option) (StopFunc, error) {
 	}
 
 	return app.Stop, nil
+}
+
+// New builds and starts new Filecoin node
+func NewWithStart(ctx context.Context, opts ...Option) (StopFunc, StartFunc, error) {
+	settings := Settings{
+		modules:  map[interface{}]fx.Option{},
+		invokes:  make([]fx.Option, _nInvokes),
+		nodeType: repo.FullNode,
+	}
+
+	// apply module options in the right order
+	if err := Options(Options(defaults()...), Options(opts...))(&settings); err != nil {
+		return nil, nil, xerrors.Errorf("applying node options failed: %w", err)
+	}
+
+	// gather constructors for fx.Options
+	ctors := make([]fx.Option, 0, len(settings.modules))
+	for _, opt := range settings.modules {
+		ctors = append(ctors, opt)
+	}
+
+	// fill holes in invokes for use in fx.Options
+	for i, opt := range settings.invokes {
+		if opt == nil {
+			settings.invokes[i] = fx.Options()
+		}
+	}
+
+	app := fx.New(
+		fx.Options(ctors...),
+		fx.Options(settings.invokes...),
+
+		fx.NopLogger,
+	)
+
+	// TODO: we probably should have a 'firewall' for Closing signal
+	//  on this context, and implement closing logic through lifecycles
+	//  correctly
+	if err := app.Start(ctx); err != nil {
+		// comment fx.NopLogger few lines above for easier debugging
+		return nil, nil, xerrors.Errorf("starting node: %w", err)
+	}
+
+	return app.Stop, app.Start, nil
 }
 
 // In-memory / testing
