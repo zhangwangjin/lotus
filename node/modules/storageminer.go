@@ -335,14 +335,26 @@ func NewStorageAsk(ctx helpers.MetricsCtx, fapi lapi.FullNode, ds dtypes.Metadat
 	return storedAsk, nil
 }
 
-func StorageProvider(minerAddress dtypes.MinerAddress, ffiConfig *ffiwrapper.Config, storedAsk *storedask.StoredAsk, h host.Host, ds dtypes.MetadataDS, ibs dtypes.StagingBlockstore, r repo.LockedRepo, pieceStore dtypes.ProviderPieceStore, dataTransfer dtypes.ProviderDataTransfer, spn storagemarket.StorageProviderNode, onlineOk dtypes.ConsiderOnlineStorageDealsConfigFunc, offlineOk dtypes.ConsiderOfflineStorageDealsConfigFunc, blocklistFunc dtypes.StorageDealPieceCidBlocklistConfigFunc) (storagemarket.StorageProvider, error) {
+func StorageProvider(minerAddress dtypes.MinerAddress,
+	ffiConfig *ffiwrapper.Config,
+	storedAsk *storedask.StoredAsk,
+	h host.Host, ds dtypes.MetadataDS,
+	ibs dtypes.StagingBlockstore,
+	r repo.LockedRepo,
+	pieceStore dtypes.ProviderPieceStore,
+	dataTransfer dtypes.ProviderDataTransfer,
+	spn storagemarket.StorageProviderNode,
+	onlineOk dtypes.ConsiderOnlineStorageDealsConfigFunc,
+	offlineOk dtypes.ConsiderOfflineStorageDealsConfigFunc,
+	blocklistFunc dtypes.StorageDealPieceCidBlocklistConfigFunc,
+	expectedSealTimeFunc dtypes.GetExpectedSealDurationFunc) (storagemarket.StorageProvider, error) {
 	net := smnet.NewFromLibp2pHost(h)
 	store, err := piecefilestore.NewLocalFileStore(piecefilestore.OsPath(r.Path()))
 	if err != nil {
 		return nil, err
 	}
 
-	opt := storageimpl.CustomDealDecisionLogic(func(ctx context.Context, deal storagemarket.MinerDeal) (bool, string, error) {
+	opt := storageimpl.CustomDealDecisionLogic(func(ctx context.Context, deal storagemarket.MinerDeal, ht abi.ChainEpoch) (bool, string, error) {
 		b, err := onlineOk()
 		if err != nil {
 			return false, "miner error", err
@@ -373,6 +385,18 @@ func StorageProvider(minerAddress dtypes.MinerAddress, ffiConfig *ffiwrapper.Con
 				log.Warnf("piece CID in proposal %s is blocklisted; rejecting storage deal proposal from client: %s", deal.Proposal.PieceCID, deal.Client.String())
 				return false, fmt.Sprintf("miner has blocklisted piece CID %s", deal.Proposal.PieceCID), nil
 			}
+		}
+
+		sealDuration, err := expectedSealTimeFunc()
+		if err != nil {
+			return false, "miner error", err
+		}
+
+		sealEpochs := sealDuration / (time.Duration(build.BlockDelaySecs) * time.Second)
+		earliest := abi.ChainEpoch(sealEpochs) + ht
+		if deal.Proposal.StartEpoch < earliest {
+			log.Warnf("proposed deal would start before sealing can be completed; rejecting storage deal proposal from client: %s", deal.Proposal.PieceCID, deal.Client.String())
+			return false, fmt.Sprintf("cannot seal a sector before %s", deal.Proposal.StartEpoch), nil
 		}
 
 		return true, "", nil
@@ -558,6 +582,24 @@ func NewGetSealDelayFunc(r repo.LockedRepo) (dtypes.GetSealingDelayFunc, error) 
 	return func() (out time.Duration, err error) {
 		err = readCfg(r, func(cfg *config.StorageMiner) {
 			out = time.Duration(cfg.SealingDelay)
+		})
+		return
+	}, nil
+}
+
+func NewSetExpectedSealDurationFunc(r repo.LockedRepo) (dtypes.SetExpectedSealDurationFunc, error) {
+	return func(delay time.Duration) (err error) {
+		err = mutateCfg(r, func(cfg *config.StorageMiner) {
+			cfg.Dealmaking.ExpectedSealDuration = config.Duration(delay)
+		})
+		return
+	}, nil
+}
+
+func NewGetExpectedSealDurationFunc(r repo.LockedRepo) (dtypes.GetExpectedSealDurationFunc, error) {
+	return func() (out time.Duration, err error) {
+		err = readCfg(r, func(cfg *config.StorageMiner) {
+			out = time.Duration(cfg.Dealmaking.ExpectedSealDuration)
 		})
 		return
 	}, nil
